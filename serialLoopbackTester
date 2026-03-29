@@ -1,0 +1,29 @@
+//A simple serial loopback tester used in conjunction with the axi uartlite module init code. 
+import time
+
+# Define the message we want to test
+test_message = "balls!\n"
+while True:
+    print("Transmitting:")
+
+# 1. Send the data out of the TX pin
+    my_uart.write_string(test_message)
+
+# Give the hardware a tiny fraction of a second to physically shift 
+# the electrical bits out of the TX pin and back into the RX pin.
+    time.sleep(0.1)
+
+# 2. Read the data coming into the RX pin
+    received_message = ""
+
+# Keep reading characters until the RX FIFO is completely empty
+    while True:
+        incoming_char = my_uart.read_char()
+    
+        if incoming_char is None:
+            break # Exit the loop when there are no more characters left
+        
+        received_message += incoming_char
+
+# 3. Print the results
+    print(f"Received:     {received_message.strip()}")
