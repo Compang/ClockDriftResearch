@@ -1,0 +1,129 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Engineer: Anthony DiMaria
+// 
+// Create Date: 03/24/2026 11:06:31 AM
+// Design Name: 
+// Module Name: UART_Tx_Triggered
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: A simple 8 bit UART tx module that stores data until externally triggered, then transmits. 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+module UART_tx_triggered_v3_core #(
+    // Calculate this: System Clock Frequency / Target Baud Rate
+    // Example: 100 MHz clock / 115200 baud = 868
+    parameter CLKS_PER_BIT = 868
+) (
+    input wire clk,          // System clock
+    input wire rst_n,        // Active-low asynchronous reset
+    
+    // User Interface
+    input wire [7:0] data_in, // 8-bit data to send
+    input wire load,          // Pulses high for 1 clock cycle to latch data
+    input wire trigger,       // Pulses high for 1 clock cycle to begin transmission
+    
+    // UART Interface
+    output reg tx,            // Serial UART output pin
+    output reg busy           // High when actively transmitting data
+);
+
+    // State Machine Definitions
+    localparam IDLE  = 3'b000;
+    localparam START = 3'b001;
+    localparam DATA  = 3'b010;
+    localparam STOP  = 3'b011;
+
+    reg [2:0] state;
+    reg [7:0] holding_reg;   // Holds the data indefinitely until triggered
+    reg [7:0] shift_reg;     // The working register used for shifting bits out
+    reg [15:0] clk_count;    // Counter for baud rate timing
+    reg [2:0] bit_idx;       // Tracks which of the 8 bits is being sent
+
+    // ----------------------------------------------------
+    // 1. The Holding Register Logic
+    // ----------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            holding_reg <= 8'd0;
+        end else if (load) begin
+            holding_reg <= data_in; // Latches data and holds it
+        end
+    end
+
+    // ----------------------------------------------------
+    // 2. The UART Transmission State Machine
+    // ----------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= IDLE;
+            tx <= 1'b1;         // UART line idles high
+            busy <= 1'b0;
+            clk_count <= 0;
+            bit_idx <= 0;
+            shift_reg <= 0;
+        end else begin
+            case (state)
+                IDLE: begin
+                    tx <= 1'b1;
+                    clk_count <= 0;
+                    bit_idx <= 0;
+                    
+                    if (trigger && !busy) begin
+                        busy <= 1'b1;
+                        shift_reg <= holding_reg; // Transfer held data to shift register
+                        state <= START;
+                    end else begin
+                        busy <= 1'b0;
+                    end
+                end
+
+                START: begin
+                    tx <= 1'b0; // Start bit is a logic 0
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1;
+                    end else begin
+                        clk_count <= 0;
+                        state <= DATA;
+                    end
+                end
+
+                DATA: begin
+                    tx <= shift_reg[bit_idx]; // Send current bit (LSB first)
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1;
+                    end else begin
+                        clk_count <= 0;
+                        if (bit_idx < 7) begin
+                            bit_idx <= bit_idx + 1;
+                        end else begin
+                            bit_idx <= 0;
+                            state <= STOP;
+                        end
+                    end
+                end
+
+                STOP: begin
+                    tx <= 1'b1; // Stop bit is a logic 1
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1;
+                    end else begin
+                        clk_count <= 0;
+                        state <= IDLE;
+                    end
+                end
+
+                default: state <= IDLE;
+            endcase
+        end
+    end
+
+endmodule
