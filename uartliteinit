@@ -1,0 +1,62 @@
+//This file initializes the Xilinx default AXI Uartlite module. 
+//Used in conjunction with loopbackTester1
+
+from pynq import Overlay
+import time
+
+# 1. Load the hardware design
+# This automatically parses the .hwh file to find your AXI IP blocks
+overlay = Overlay("design_1.bit") # Replace with your actual file name
+
+# 2. Extract the specific UART IP block
+# The name 'axi_uartlite_0' must match the name in your Vivado block diagram
+uart_ip = overlay.axi_uartlite_0
+
+# 3. Create a wrapper class to handle the AXI MMIO registers
+class AxiUartLite:
+    def __init__(self, ip):
+        self.ip = ip
+        
+        # AXI Uartlite Register Map Offsets
+        self.RX_FIFO    = 0x00 # Read to get data
+        self.TX_FIFO    = 0x04 # Write to send data
+        self.STATUS_REG = 0x08 # Read to check FIFO status
+        self.CTRL_REG   = 0x0C # Write to reset FIFOs
+        
+        self._reset_fifos()
+
+    def _reset_fifos(self):
+        # Writing '1' to bits 0 and 1 of the Control Register clears the RX and TX FIFOs
+        self.ip.write(self.CTRL_REG, 0x03)
+        time.sleep(0.01) # Brief pause for the hardware to clear
+        self.ip.write(self.CTRL_REG, 0x00)
+
+    def rx_data_present(self):
+        # Bit 0 of Status Register is 1 if there is valid data in the RX FIFO
+        status = self.ip.read(self.STATUS_REG)
+        return (status & 0x01) == 0x01
+
+    def tx_fifo_full(self):
+        # Bit 3 of Status Register is 1 if the TX FIFO is full
+        status = self.ip.read(self.STATUS_REG)
+        return (status & 0x08) == 0x08
+
+    def write_char(self, char):
+        # Block until there is room in the hardware TX FIFO
+        while self.tx_fifo_full():
+            pass 
+        # Write the ASCII integer value to the TX register
+        self.ip.write(self.TX_FIFO, ord(char))
+
+    def write_string(self, text):
+        for char in text:
+            self.write_char(char)
+
+    def read_char(self):
+        # Check if hardware has received anything
+        if self.rx_data_present():
+            return chr(self.ip.read(self.RX_FIFO))
+        return None
+
+# 4. Instantiate the controller
+my_uart = AxiUartLite(uart_ip)
