@@ -1,0 +1,110 @@
+`timescale 1ns / 1ps
+
+module uart_rx_latched #(
+    parameter CLK_FREQ = 50000000, 
+    parameter BAUD_RATE = 115200
+)(
+    input  wire       clk,
+    input  wire       reset,      // Active high reset
+    input  wire       rx_serial,  // The incoming serial line
+    output reg  [7:0] rx_data_out, // The safely held byte
+    output reg dv
+);
+
+    localparam CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;
+
+    localparam s_IDLE     = 3'b000;
+    localparam s_RX_START = 3'b001;
+    localparam s_RX_DATA  = 3'b010;
+    localparam s_RX_STOP  = 3'b011;
+    localparam s_CLEANUP  = 3'b100;
+
+    reg [2:0]  r_SM_Main;
+    reg [15:0] r_Clock_Count;
+    reg [2:0]  r_Bit_Index;
+    
+    // The hidden shift register that catches bits as they arrive
+    reg [7:0]  r_shift_data; 
+
+    always @(posedge clk) begin
+        if (reset) begin
+            r_SM_Main     <= s_IDLE;
+            r_Clock_Count <= 0;
+            r_Bit_Index   <= 0;
+            r_shift_data  <= 8'd0;
+            rx_data_out   <= 8'd0; // Initialize the held output
+            dv <= 0;  //setting data invalid
+        end else begin
+            case (r_SM_Main)
+                
+                s_IDLE: begin
+                    r_Clock_Count <= 0;
+                    r_Bit_Index   <= 0;
+                    dv <= 0;
+
+                    if (rx_serial == 1'b0) 
+                        r_SM_Main <= s_RX_START;
+                    else
+                        r_SM_Main <= s_IDLE;
+                    
+                end
+
+                s_RX_START: begin
+                    if (r_Clock_Count == (CLKS_PER_BIT-1)/2) begin
+                        if (rx_serial == 1'b0) begin 
+                            r_Clock_Count <= 0;      
+                            r_SM_Main     <= s_RX_DATA;
+                        end else begin
+                            r_SM_Main     <= s_IDLE; 
+                        end
+                    end else begin
+                        r_Clock_Count <= r_Clock_Count + 1;
+                        r_SM_Main     <= s_RX_START;
+                    end
+                end
+
+                s_RX_DATA: begin
+                    if (r_Clock_Count < CLKS_PER_BIT-1) begin
+                        r_Clock_Count <= r_Clock_Count + 1;
+                        r_SM_Main     <= s_RX_DATA;
+                    end else begin
+                        r_Clock_Count <= 0;
+                        
+                        // Load the incoming bit into the hidden shift register
+                        r_shift_data[r_Bit_Index] <= rx_serial; 
+
+                        if (r_Bit_Index < 7) begin
+                            r_Bit_Index <= r_Bit_Index + 1;
+                            r_SM_Main   <= s_RX_DATA;
+                        end else begin
+                            r_Bit_Index <= 0;
+                            r_SM_Main   <= s_RX_STOP;
+                        end
+                    end
+                end
+
+                s_RX_STOP: begin
+                    if (r_Clock_Count < CLKS_PER_BIT-1) begin
+                        r_Clock_Count <= r_Clock_Count + 1;
+                        r_SM_Main     <= s_RX_STOP;
+                    end else begin
+                        r_Clock_Count <= 0;
+                        r_SM_Main     <= s_CLEANUP;
+                    end
+                end
+
+                s_CLEANUP: begin
+                    r_SM_Main <= s_IDLE;
+                    
+                    // The byte is fully received! 
+                    // Dump the hidden data into the output register.
+                    // It will sit here permanently until this line runs again.
+                    rx_data_out <= r_shift_data;
+                    dv <= 1; 
+                end
+
+                default: r_SM_Main <= s_IDLE;
+            endcase
+        end
+    end
+endmodule
