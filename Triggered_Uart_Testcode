@@ -1,0 +1,45 @@
+from pynq import Overlay
+import time
+
+# 1. Load the hardware design into the FPGA
+overlay = Overlay("design_1.bit")
+
+# 2. Map the hardware blocks to Python objects
+uart_0 = overlay.UART_tx_triggered_v3_0
+uart_1 = overlay.UART_tx_triggered_v3_1
+uart_2 = overlay.UART_tx_triggered_v3_2
+trigger_gpio = overlay.axi_gpio_0
+
+# ---------------------------------------------------------
+# Helper Function: Load data into a UART module's holding register
+# ---------------------------------------------------------
+def load_uart_data(uart_module, data_value):
+    uart_module.write(0x00, data_value)
+    uart_module.write(0x04, 1)
+    uart_module.write(0x04, 0)
+
+# ---------------------------------------------------------
+# Execution (Infinite Loop)
+# ---------------------------------------------------------
+print("Starting infinite transmission loop...")
+print("Press the 'Stop' button (square icon) in Jupyter to halt.")
+
+try:
+    while True:
+        # 1. Load the identifying numbers into each module
+        load_uart_data(uart_0, ord('1'))
+        load_uart_data(uart_1, ord('2'))
+        load_uart_data(uart_2, ord('3'))
+
+        # 2. Fire the simultaneous trigger!
+        trigger_gpio.channel1[0].write(1) # Pulse High
+        trigger_gpio.channel1[0].write(0) # Pulse Low
+
+        # 3. Wait before firing again
+        # 0.5 seconds = 2 transmissions per second. 
+        # Adjust this depending on what your logic analyzer or serial terminal can handle!
+        time.sleep(0.1) 
+
+except KeyboardInterrupt:
+    # This catches the interrupt when you stop the Jupyter cell
+    print("\nTransmission loop safely halted by user.")
