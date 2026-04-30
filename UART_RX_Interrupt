@@ -1,11 +1,11 @@
 `timescale 1ns / 1ps
 
 module uart_rx_latched #(
-    parameter CLK_FREQ = 50000000, 
+    parameter CLK_FREQ = 100000000, 
     parameter BAUD_RATE = 115200
 )(
     input  wire       clk,
-    input  wire       reset,      // Active high reset
+    input  wire       rst_n,      // Active high reset
     input  wire       rx_serial,  // The incoming serial line
     output reg  [7:0] rx_data_out, // The safely held byte
     output reg dv
@@ -27,7 +27,7 @@ module uart_rx_latched #(
     reg [7:0]  r_shift_data; 
 
     always @(posedge clk) begin
-        if (reset) begin
+        if (!rst_n) begin
             r_SM_Main     <= s_IDLE;
             r_Clock_Count <= 0;
             r_Bit_Index   <= 0;
@@ -40,7 +40,7 @@ module uart_rx_latched #(
                 s_IDLE: begin
                     r_Clock_Count <= 0;
                     r_Bit_Index   <= 0;
-                    dv <= 0;
+                    //dv <= 0;
 
                     if (rx_serial == 1'b0) 
                         r_SM_Main <= s_RX_START;
@@ -54,6 +54,7 @@ module uart_rx_latched #(
                         if (rx_serial == 1'b0) begin 
                             r_Clock_Count <= 0;      
                             r_SM_Main     <= s_RX_DATA;
+                            dv <= 0; //clear dv flag only when new data is incomming
                         end else begin
                             r_SM_Main     <= s_IDLE; 
                         end
