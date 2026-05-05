@@ -1,0 +1,78 @@
+from pynq import Overlay, MMIO
+import time
+
+# 1. Load the hardware design into the FPGA
+overlay = Overlay("design_1.bit")
+
+# 2. Map the TX hardware blocks normally (they don't have interrupt pins)
+uart_0 = overlay.UART_tx_triggered_v3_0
+uart_1 = overlay.UART_tx_triggered_v3_1
+uart_2 = overlay.UART_tx_triggered_v3_2
+trigger_gpio = overlay.axi_gpio_0
+
+# 3. Map the RX Modules using MMIO to bypass the interrupt parsing bug
+# We grab the physical address from the dictionary and map 64K (0x10000) of memory
+rx_0 = MMIO(overlay.ip_dict['Data_Saving_UART_0']['phys_addr'], 0x10000)
+rx_1 = MMIO(overlay.ip_dict['Data_Saving_UART_1']['phys_addr'], 0x10000)
+rx_2 = MMIO(overlay.ip_dict['Data_Saving_UART_2']['phys_addr'], 0x10000)
+
+# ---------------------------------------------------------
+# Helper Function: Load data into a UART module's TX register
+# ---------------------------------------------------------
+def load_uart_data(uart_module, data_value):
+    uart_module.write(0x00, data_value)
+
+# ---------------------------------------------------------
+# Helper Function: Read data from an RX module
+# ---------------------------------------------------------
+def read_uart_data(rx_module):
+    timeout = 10000 
+    
+    # Poll register 0x04 (Data Valid/Status flag)
+    while rx_module.read(0x04) == 0 and timeout > 0:
+        timeout -= 1
+        
+    if timeout > 0:
+        # Data is valid, read from register 0x00
+        return rx_module.read(0x00)
+    else:
+        return None
+
+# ---------------------------------------------------------
+# Execution (Infinite Loop)
+# ---------------------------------------------------------
+print("Starting infinite transmission & reception loop...")
+print("Press the 'Stop' button (square icon) in Jupyter to halt.\n")
+
+try:
+    while True:
+        # 1. Load the identifying numbers into each TX module
+        load_uart_data(uart_0, ord('1'))
+        load_uart_data(uart_1, ord('2'))
+        load_uart_data(uart_2, ord('3'))
+
+        # 2. Fire the simultaneous trigger!
+        trigger_gpio.channel1[0].write(1) # Pulse High
+        time.sleep(0.001)
+        trigger_gpio.channel1[0].write(0) # Pulse Low
+
+        # 3. Brief pause to allow transmission
+        time.sleep(0.01)
+
+        # 4. Read the received data from each RX module
+        rx_val_0 = read_uart_data(rx_0)
+        rx_val_1 = read_uart_data(rx_1)
+        rx_val_2 = read_uart_data(rx_2)
+
+        # 5. Format and print the results
+        char_0 = chr(rx_val_0) if rx_val_0 is not None else "TIMEOUT"
+        char_1 = chr(rx_val_1) if rx_val_1 is not None else "TIMEOUT"
+        char_2 = chr(rx_val_2) if rx_val_2 is not None else "TIMEOUT"
+
+        print(f"RX 0: {char_0} | RX 1: {char_1} | RX 2: {char_2}")
+
+        # 6. Wait before firing the next round
+        time.sleep(0.4) 
+
+except KeyboardInterrupt:
+    print("\nTransmission loop safely halted by user.")
